@@ -23,7 +23,6 @@ def getAllEURQuotes():
 def storeAllEURQuotes():
     x = getAllEURQuotes()
     for p in x:
-        #print(p['base_currency_id'], p['price'])
         storeMarketData(p['base_currency_id'], p['price'], pd.to_datetime('now'))
 
 if __name__ == '__main__':
