@@ -1,6 +1,7 @@
 import os
 import http.client
 import logging
+import argparse
 from sqlalchemy import create_engine, exc, text
 import json
 import jwt
@@ -36,9 +37,24 @@ headers = {
 db_url = os.getenv('DATABASE_URL', f'postgresql://{db_user}:{db_pass}@localhost:5432/{db_db}')
 engine = create_engine(db_url, echo=False)  # Enable SQL echo for debugging
 
+known_stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'PAX', 'GUSD', 'HUSD', 'EURC']
+
 payload = ''
 
-def setup_logging(log_directory='/var/log', log_level=logging.INFO, console_output=False):
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Trading Bot with customizable log level")
+    parser.add_argument('--log-level', default='INFO', 
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        help='Set the logging level')
+    return parser.parse_args()
+
+args = parse_arguments()
+log_level = getattr(logging, args.log_level.upper())
+
+def filter_out_stablecoins(currencies):
+    return [currency for currency in currencies if currency not in known_stablecoins]
+
+def setup_logging(log_directory='/var/log', log_level=logging.INFO):
     # Ensure the log directory exists
     if not os.path.exists(log_directory):
         os.makedirs(log_directory)
@@ -47,32 +63,53 @@ def setup_logging(log_directory='/var/log', log_level=logging.INFO, console_outp
     log_filename = f"trading_bot.log"
     log_filepath = os.path.join(log_directory, log_filename)
     
-     # Configure logging to file only
+    # Configure logging to file and console
     logging.basicConfig(
-        filename=log_filepath,
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(log_filepath),
+            logging.StreamHandler()  # This will output to console
+        ]
     )
     
-    if console_output:
-        # Add console handler if requested
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(log_level)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(formatter)
-        logging.getLogger().addHandler(console_handler)
-    
     logging.info(f"Logging initialized. Log file: {log_filepath}")
+    logging.info(f"Log level set to: {logging.getLevelName(log_level)}")
 
-def getResponseFromAPI(uri, method='GET'):
+# Set up logging
+setup_logging(log_level=log_level)
+
+def getResponseFromAPI(uri, method='GET', data=None):
+    global payload, headers
+    
     jwt_token = getJwtToken(uri, method)
     headers['Authorization'] = "Bearer " + jwt_token
     
-    conn.request(method, uri, payload, headers)
-    res = conn.getresponse()
-    data = res.read()
-    return data.decode("utf-8")
+    if method == 'POST':
+        headers['Content-Type'] = 'application/json'
+        payload = data
+    else:
+        payload = None
+
+    logging.debug(f"Making {method} request to: {uri}")
+    logging.debug(f"Headers: {headers}")
+    if payload:
+        logging.debug(f"Payload: {payload}")
+
+    try:
+        conn.request(method, uri, payload, headers)
+        res = conn.getresponse()
+        response_data = res.read().decode("utf-8")
+        
+        logging.debug(f"Response status: {res.status}")
+        logging.debug(f"Response headers: {dict(res.getheaders())}")
+        logging.debug(f"Response body: {response_data[:400]}...")  # Log first 200 characters
+
+        return response_data
+    except Exception as e:
+        logging.error(f"Error in API request: {str(e)}")
+        return None
 
 def getCurrencyDetails(cId):
     conn.request("GET", "/currencies/"+cId, payload, headers)
@@ -84,6 +121,11 @@ def getAccounts():
     x = getResponseFromAPI(f"/api/v3/brokerage/accounts")
     logging.info(f"getAccounts returned: {x[:100]}...")  # Zeigt die ersten 100 Zeichen
     return x
+
+def getCurrentPrice(product_id):
+    response = getResponseFromAPI(f"/api/v3/brokerage/products/{product_id}", method='GET')
+    price_data = json.loads(response)
+    return price_data['price']
 
 def getProducts():
     x = getResponseFromAPI(f"/api/v3/brokerage/market/products")

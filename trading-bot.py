@@ -3,9 +3,8 @@ from typing import List, Dict
 import psycopg2
 from psycopg2.extras import DictCursor
 from decimal import Decimal
-
-# Set up logging
-setup_logging()
+import uuid
+import math
 
 def getTradableCurrencies() -> List[str]:
     eurQuotes = getAllEURQuotes()
@@ -45,19 +44,21 @@ def resample_data(df, interval='1H'):
 
 def get_sell_opportunities():
     tradableCurrencies = getTradableCurrencies()
-    logging.info(f"Tradable currencies: {tradableCurrencies}")
+    tradableCurrencies = filter_out_stablecoins(tradableCurrencies)
+    logging.info(f"Tradable non-stablecoin currencies: {tradableCurrencies}")
     
     accountsJson = getAccounts()
     sellableBalances = get_sellable_balances(accountsJson)
-    logging.info(f"Sellable balances: {sellableBalances}")
+    sellableBalances = {k: v for k, v in sellableBalances.items() if k not in known_stablecoins}
+    logging.info(f"Sellable non-stablecoin balances: {sellableBalances}")
     
     marketData = fetch_market_data_last_4_days(tradableCurrencies)
     resampledData = resample_data(marketData, interval='1h')
     
     allCurrencyAnalysis = determine_all_currency_analysis(resampledData)
     
-    # Log analysis for all currencies
-    logging.info("Analysis for all currencies:")
+    # Log analysis for all non-stablecoin currencies
+    logging.info("Analysis for all non-stablecoin currencies:")
     for currency, analysis in allCurrencyAnalysis.items():
         logging.info(f"{currency}: Current price {analysis['currentPrice']:.4f}, "
                      f"SMA {analysis['sma']:.4f}, RSI {analysis['rsi']:.2f}")
@@ -89,18 +90,18 @@ def get_sell_opportunities():
 
 def get_buy_opportunities():
     tradableCurrencies = getTradableCurrencies()
-    logging.info(f"Tradable currencies: {tradableCurrencies}")
+    tradableCurrencies = filter_out_stablecoins(tradableCurrencies)
+    logging.info(f"Tradable non-stablecoin currencies: {tradableCurrencies}")
 
-    accountsJson = getAccounts()
     marketData = fetch_market_data_last_4_days(tradableCurrencies)
     resampledData = resample_data(marketData, interval='1h')
 
     allCurrencyAnalysis = determine_all_currency_analysis(resampledData)
 
-    eur_balance = Decimal(getAccountEURBalance().get('EUR', '0'))
+    eur_balance = Decimal(getAccountEURBalance())
     logging.info(f"Available EUR balance: {eur_balance}")
 
-    if eur_balance <= 0:
+    if eur_balance <= 1:
         logging.info("No EUR available for investment.")
         return []
 
@@ -168,7 +169,7 @@ def getAccountEURBalance():
         if account['currency'] == 'EUR':
             return account['available_balance']['value']
     
-    return '0'
+    return '0'  # Return '0' as a string if no EUR account is found
 
 def get_sellable_balances(accountsJson):
     accounts = json.loads(accountsJson)['accounts']
@@ -194,17 +195,75 @@ def calculate_rsi(prices, periods=14):
     return 100 - (100 / (1 + rs))
 
 def sellCurrency(symbol, amount):
-    payload = json.dumps({
-        "symbol": symbol,
-        "amount": str(amount)
-    })
-    #response = getResponseFromAPI("/api/v3/brokerage/sell", method='POST', payload=payload)
-    #logging.info(f"Response from selling {amount} {symbol}: {response}")
-    print(f"Would sell {amount} {symbol}")
+    product_id = f"{symbol}-EUR"
+    order_data = {
+        "client_order_id": str(uuid.uuid4()),
+        "product_id": product_id,
+        "side": "SELL",
+        "order_configuration": {
+            "market_market_ioc": {
+                "quote_size": str(amount)
+            }
+        }
+    }
+    
+    payload = json.dumps(order_data)
+    response = getResponseFromAPI("/api/v3/brokerage/orders", method='POST', data=payload)
+        
+    if "error" not in json.loads(response):
+        logging.info(f"Sold {amount}€ of {symbol}")
+        return response
+        
+    logging.error(f"Error selling {amount} {symbol}: {response}")
+    return None
+
+def buyCurrency(symbol, amount):
+    # Runde den Betrag auf ganze Euro ab
+    rounded_amount = math.floor(float(amount))
+    
+    if rounded_amount == 0:
+        logging.warning(f"Rounded amount for {symbol} is 0. Skipping purchase.")
+        return None
+
+    product_id = f"{symbol}-EUR"
+    order_data = {
+        "client_order_id": str(uuid.uuid4()),
+        "product_id": product_id,
+        "side": "BUY",
+        "order_configuration": {
+            "market_market_ioc": {
+                "quote_size": str(rounded_amount)
+            }
+        }
+    }
+    
+    logging.info(f"Attempting to buy {rounded_amount}€ of {symbol}")
+    
+    for pid_format in [f"{symbol}-EUR", f"{symbol}EUR", f"{symbol.lower()}-eur"]:
+        order_data["product_id"] = pid_format
+        payload = json.dumps(order_data)
+        logging.debug(f"Sending order with payload: {payload}")
+        response = getResponseFromAPI("/api/v3/brokerage/orders", method='POST', data=payload)
+        
+        response_json = json.loads(response)
+        if "error" not in response_json:
+            logging.info(f"Successfully bought {rounded_amount}€ of {symbol}")
+            logging.debug(f"Full response: {response}")
+            return response
+        
+        logging.warning(f"Attempt with product_id {pid_format} failed. Error: {response_json.get('error')}. Trying next format.")
+    
+    logging.error(f"All product_id formats failed for {symbol}.")
+    return None
 
 if __name__ == "__main__":
     sellOpportunities = get_sell_opportunities()
     for opportunity in sellOpportunities:
-        sellCurrency(opportunity['symbol'], opportunity['availableBalance'])
+        #sellCurrency(opportunity['symbol'], opportunity['availableBalance'])
+        print(f"Would sell {opportunity['availableBalance']} {opportunity['symbol']}")
     
     buyOpportunities = get_buy_opportunities()
+    for opportunity in buyOpportunities:
+        buyCurrency(opportunity['symbol'], opportunity['amount_eur'])
+
+    sellCurrency("BTC", "10")
