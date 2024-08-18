@@ -46,36 +46,32 @@ def parse_arguments():
     parser.add_argument('--log-level', default='INFO', 
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Set the logging level')
+    parser.add_argument('--testing', action='store_true',
+                        help='Run in testing mode without executing trades')
     return parser.parse_args()
 
 args = parse_arguments()
 log_level = getattr(logging, args.log_level.upper())
+TESTING_MODE = args.testing
 
 def filter_out_stablecoins(currencies):
     return [currency for currency in currencies if currency not in known_stablecoins]
 
 def setup_logging(log_directory='/var/log', log_level=logging.INFO):
-    # Ensure the log directory exists
     if not os.path.exists(log_directory):
         os.makedirs(log_directory)
     
-    # Create a timestamp for the log file name
     log_filename = f"trading_bot.log"
     log_filepath = os.path.join(log_directory, log_filename)
     
-    # Configure logging to file and console
     logging.basicConfig(
+        filename=log_filepath,
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[
-            logging.FileHandler(log_filepath),
-            logging.StreamHandler()  # This will output to console
-        ]
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
     
     logging.info(f"Logging initialized. Log file: {log_filepath}")
-    logging.info(f"Log level set to: {logging.getLevelName(log_level)}")
 
 # Set up logging
 setup_logging(log_level=log_level)
@@ -130,6 +126,15 @@ def getCurrentPrice(product_id):
 def getProducts():
     x = getResponseFromAPI(f"/api/v3/brokerage/market/products")
     return x
+
+def getOrderDetails(order_id):
+    response = getResponseFromAPI(f"/api/v3/brokerage/orders/historical/{order_id}", method='GET')
+    try:
+        order_details = json.loads(response)
+        return order_details.get("order", {})
+    except Exception as e:
+        logging.error(f"Error retrieving order details for order {order_id}: {str(e)}")
+        return None
 
 def getAllEURQuotes():
     allQuotes = getProducts()
