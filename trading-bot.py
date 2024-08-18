@@ -91,6 +91,7 @@ def get_sell_opportunities():
                          f"Available balance: {opportunity['availableBalance']:.8f}")
     else:
         logging.info("No sell opportunities found based on the criteria and available balances.")
+        print("No sell opportunities found based on the criteria and available balances.")
     
     return sellOpportunities
 
@@ -105,6 +106,7 @@ def get_buy_opportunities():
 
     if eur_balance <= 10:
         logging.info("Insufficient EUR available for investment.")
+        print("Insufficient EUR available for investment.")
         return []
 
     # Sort currencies by RSI in ascending order (lower RSI is better for buying)
@@ -144,10 +146,14 @@ def get_buy_opportunities():
             })
             remaining_balance -= rounded_amount
 
-    logging.info("Buy opportunities:")
-    for opportunity in buy_opportunities:
-        logging.info(f"{opportunity['symbol']}: €{opportunity['amount_eur']} "
-                     f"(Price: {opportunity['current_price']}, RSI: {opportunity['rsi']:.2f})")
+    if buy_opportunities:
+        logging.info("Buy opportunities:")
+        for opportunity in buy_opportunities:
+            logging.info(f"{opportunity['symbol']}: €{opportunity['amount_eur']} "
+                        f"(Price: {opportunity['current_price']}, RSI: {opportunity['rsi']:.2f})")
+    else:
+        logging.info("No buy opportunities found based on the criteria and available balances.")
+        print("No buy opportunities found based on the criteria and available balances.")
 
     return buy_opportunities
 
@@ -333,10 +339,7 @@ def buyCurrency(symbol, amount_eur, force=False):
         if "success" in response_json and response_json["success"]:
             order_id = response_json["success_response"]["order_id"]
             
-            # Warte kurz, um der API Zeit zu geben, den Auftrag zu verarbeiten
             time.sleep(2)
-            
-            # Hole die Orderdetails
             order_details = getOrderDetails(order_id)
             
             if order_details:
