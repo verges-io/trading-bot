@@ -382,6 +382,8 @@ def print_top_rsi_values():
     print("\nTop 3 RSI values for potential buy:")
     for symbol, analysis in buy_candidates:
         print(f"{symbol}: RSI {analysis['rsi']:.2f}")
+    
+    print("\n")
 
 if __name__ == "__main__":
     tradableCurrencies = getTradableCurrencies()
