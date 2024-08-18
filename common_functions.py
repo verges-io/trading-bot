@@ -70,8 +70,6 @@ def setup_logging(log_directory='/var/log', log_level=logging.INFO):
         format='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
-    logging.info(f"Logging initialized. Log file: {log_filepath}")
 
 # Set up logging
 setup_logging(log_level=log_level)
