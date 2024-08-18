@@ -68,6 +68,7 @@ def get_sell_opportunities():
     for currency, analysis in allCurrencyAnalysis.items():
         if currency in sellableBalances:
             if analysis['currentPrice'] > analysis['sma'] and analysis['rsi'] > 70:
+                print(currency)
                 opportunity = {
                     'symbol': currency,
                     'currentPrice': analysis['currentPrice'],
@@ -101,7 +102,7 @@ def get_buy_opportunities():
     eur_balance = Decimal(getAccountEURBalance())
     logging.info(f"Available EUR balance: {eur_balance}")
 
-    if eur_balance <= 1:
+    if eur_balance <= 10:
         logging.info("No EUR available for investment.")
         return []
 
@@ -194,27 +195,34 @@ def calculate_rsi(prices, periods=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def sellCurrency(symbol, amount):
-    product_id = f"{symbol}-EUR"
+def sellCurrency(symbol):
+    product_id = f"{symbol['symbol']}-EUR"
+    
+    # Runden Sie die Menge auf 8 Dezimalstellen ab (typisch für Kryptowährungen)
+    base_amount = math.floor(float(symbol['availableBalance']) * 1e8) / 1e8
+    
     order_data = {
         "client_order_id": str(uuid.uuid4()),
         "product_id": product_id,
         "side": "SELL",
         "order_configuration": {
             "market_market_ioc": {
-                "quote_size": str(amount)
+                "base_size": str(base_amount)
             }
         }
     }
     
     payload = json.dumps(order_data)
+    logging.debug(f"Sending sell order with payload: {payload}")
     response = getResponseFromAPI("/api/v3/brokerage/orders", method='POST', data=payload)
-        
-    if "error" not in json.loads(response):
-        logging.info(f"Sold {amount}€ of {symbol}")
+    
+    response_json = json.loads(response)
+    if "success" in response_json and response_json["success"]:
+        logging.info(f"Sold {base_amount} {symbol}")
         return response
-        
-    logging.error(f"Error selling {amount} {symbol}: {response}")
+    
+    error_message = response_json.get("error_response", {}).get("message", "Unknown error")
+    logging.error(f"Error selling {base_amount} {symbol}: {error_message}")
     return None
 
 def buyCurrency(symbol, amount):
@@ -259,11 +267,8 @@ def buyCurrency(symbol, amount):
 if __name__ == "__main__":
     sellOpportunities = get_sell_opportunities()
     for opportunity in sellOpportunities:
-        #sellCurrency(opportunity['symbol'], opportunity['availableBalance'])
-        print(f"Would sell {opportunity['availableBalance']} {opportunity['symbol']}")
+        sellCurrency(opportunity)
     
     buyOpportunities = get_buy_opportunities()
     for opportunity in buyOpportunities:
         buyCurrency(opportunity['symbol'], opportunity['amount_eur'])
-
-    sellCurrency("BTC", "10")
