@@ -2,7 +2,7 @@ from common_functions import *
 from typing import List, Dict
 import psycopg2
 from psycopg2.extras import DictCursor
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 import uuid
 import math
 
@@ -21,6 +21,43 @@ def getTradableCurrencies() -> List[str]:
 def getTradableCurrencies() -> List[str]:
     eurQuotes = getAllEURQuotes()
     return [product['base_currency_id'] for product in eurQuotes]
+
+def resample_data(df, interval='1H'):
+    df = df.set_index('timestamp')
+    resampled = df.groupby('symbol').resample(interval).agg({'price': 'last'}).reset_index()
+    return resampled
+
+def calculate_rsi(prices, periods=14):
+    delta = prices.diff()
+    
+    gain = (delta.where(delta > 0, 0)).ewm(span=periods, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(span=periods, adjust=False).mean()
+    
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+def determine_all_currency_analysis(df, rsi_periods=14, sma_window=20):
+    analysis = {}
+    for symbol in df['symbol'].unique():
+        symbol_data = df[df['symbol'] == symbol].sort_values('timestamp')
+        
+        if len(symbol_data) < max(rsi_periods, sma_window):
+            continue
+        
+        prices = symbol_data['price']
+        current_price = prices.iloc[-1]
+        sma = prices.rolling(window=sma_window).mean().iloc[-1]
+        rsi = calculate_rsi(prices, periods=rsi_periods).iloc[-1]
+        
+        analysis[symbol] = {
+            'currentPrice': current_price,
+            'sma': sma,
+            'rsi': rsi
+        }
+    
+    return analysis
 
 def fetch_market_data_last_4_days(tradable_currencies):
     four_days_ago = datetime.now() - timedelta(days=4)
@@ -45,11 +82,6 @@ def fetch_market_data_last_4_days(tradable_currencies):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     return df
 
-def resample_data(df, interval='1H'):
-    df = df.set_index('timestamp')
-    resampled = df.groupby('symbol').resample(interval.replace('H', 'h')).agg({'price': 'last'}).reset_index()
-    return resampled
-
 def get_sell_opportunities():
     global tradableCurrencies
     global marketData
@@ -73,7 +105,6 @@ def get_sell_opportunities():
         if currency in sellableBalances:
             balance = sellableBalances[currency]
             if balance > Decimal('0.00001') and analysis['currentPrice'] > analysis['sma'] and analysis['rsi'] > 70:
-                print(currency)
                 opportunity = {
                     'symbol': currency,
                     'currentPrice': analysis['currentPrice'],
@@ -101,43 +132,46 @@ def get_buy_opportunities():
     global resampledData
     global allCurrencyAnalysis
 
+    # Hole den aktuellen EUR-Kontostand
     eur_balance = Decimal(getAccountEURBalance())
-    logging.info(f"Available EUR balance: {eur_balance}")
+    
+    # Runde das Investitionskapital auf die nächste Zehnerstelle ab
+    eur_balance = Decimal(str(math.floor(eur_balance / 10) * 10))
+    
+    print(f"Available EUR balance (rounded down to nearest ten): {eur_balance}")
 
-    if eur_balance <= 10:
-        logging.info("Insufficient EUR available for investment.")
+    if eur_balance < 10:
         print("Insufficient EUR available for investment.")
         return []
 
-    # Sort currencies by RSI in ascending order (lower RSI is better for buying)
-    sorted_currencies = sorted(allCurrencyAnalysis.items(), key=lambda x: x[1]['rsi'])
+    # Filter currencies with RSI < 30 and sort them by RSI in ascending order
+    top_performers = sorted(
+        [(currency, analysis) for currency, analysis in allCurrencyAnalysis.items() if analysis['rsi'] < 30],
+        key=lambda x: x[1]['rsi']
+    )[:3]  # Limit to top 3
 
-    # Determine how many top performers to consider
-    if eur_balance < 20:
-        top_count = 1
-    elif eur_balance < 40:
-        top_count = 2
-    else:
-        top_count = 3
+    if not top_performers:
+        print("No cryptocurrencies with RSI < 30 found. Investment postponed.")
+        return []
 
-    top_performers = sorted_currencies[:top_count]
-
-    # Calculate investment amounts based on RSI
-    total_inverse_rsi = sum(100 - analysis['rsi'] for _, analysis in top_performers)
     buy_opportunities = []
     remaining_balance = eur_balance
 
-    for currency, analysis in top_performers:
-        if remaining_balance < 1:
+    for i, (currency, analysis) in enumerate(top_performers):
+        if remaining_balance < 10:
+            print(f"Remaining balance {remaining_balance} is less than 10 EUR. Stopping.")
             break
-        
-        weight = (100 - analysis['rsi']) / total_inverse_rsi
-        investment_amount = min(eur_balance * Decimal(weight), remaining_balance)
-        
-        # Round down to nearest euro
-        rounded_amount = Decimal(math.floor(investment_amount))
-        
-        if rounded_amount >= 1:
+
+        if i == len(top_performers) - 1 or len(top_performers) == 1:
+            investment_amount = remaining_balance
+        else:
+            investment_amount = remaining_balance / Decimal(len(top_performers) - i)
+
+        rounded_amount = Decimal(math.floor(investment_amount / 10) * 10)
+
+        print(f"Considering {currency}: Investment amount before rounding: {investment_amount}, after rounding: {rounded_amount}")
+
+        if rounded_amount >= 10:
             buy_opportunities.append({
                 'symbol': currency,
                 'amount_eur': rounded_amount,
@@ -145,38 +179,15 @@ def get_buy_opportunities():
                 'rsi': analysis['rsi']
             })
             remaining_balance -= rounded_amount
+            print(f"Added buy opportunity for {currency}: {rounded_amount} EUR. Remaining balance: {remaining_balance}")
+        else:
+            print(f"Skipping {currency} because rounded amount {rounded_amount} is less than 10 EUR")
 
-    if buy_opportunities:
-        logging.info("Buy opportunities:")
-        for opportunity in buy_opportunities:
-            logging.info(f"{opportunity['symbol']}: €{opportunity['amount_eur']} "
-                        f"(Price: {opportunity['current_price']}, RSI: {opportunity['rsi']:.2f})")
-    else:
-        logging.info("No buy opportunities found based on the criteria and available balances.")
-        print("No buy opportunities found based on the criteria and available balances.")
+    print("Final buy opportunities:")
+    for opportunity in buy_opportunities:
+        print(f"{opportunity['symbol']}: €{opportunity['amount_eur']} (RSI: {opportunity['rsi']:.2f})")
 
     return buy_opportunities
-
-def determine_all_currency_analysis(df):
-    analysis = {}
-    for symbol in df['symbol'].unique():
-        symbolData = df[df['symbol'] == symbol].sort_values('timestamp')
-        
-        if len(symbolData) < 20:  # Ensure we have enough data points
-            continue
-        
-        prices = symbolData['price']
-        currentPrice = prices.iloc[-1]
-        sma = simple_moving_average(prices).iloc[-1]
-        rsi = calculate_rsi(prices).iloc[-1]
-        
-        analysis[symbol] = {
-            'currentPrice': currentPrice,
-            'sma': sma,
-            'rsi': rsi
-        }
-    
-    return analysis
 
 def getAccountEURBalance():
     accountsJson = getAccounts()
@@ -226,48 +237,41 @@ def get_sellable_balances(accountsJson):
 def simple_moving_average(prices, window=20):
     return prices.rolling(window=window).mean()
 
-def calculate_rsi(prices, periods=14):
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def sellCurrency(opportunity, force=False):
+def sellCurrency(opportunity, force=False, decimal_places=8):
     if TESTING_MODE and not force:
-        logging.info(f"TESTING: Would sell {opportunity['availableBalance']} of {opportunity['symbol']}")
+        logging.info(f"TESTING: Would sell {opportunity['availableBalance']} of {opportunity['symbol']} with {decimal_places} decimal places")
         return None
 
     symbol = opportunity['symbol']
-    base_amount = opportunity['availableBalance']
+    base_amount = Decimal(str(opportunity['availableBalance']))
     
-    if base_amount <= 0.00001:  # Minimum amount to sell
+    if base_amount <= Decimal('0.00001'):  # Minimum amount to sell
         logging.warning(f"Amount too small to sell for {symbol}: {base_amount}")
         return None
 
     product_id = f"{symbol}-EUR"
-    
-    # Runden Sie die Menge auf 8 Dezimalstellen ab (typisch für Kryptowährungen)
-    base_amount = math.floor(float(opportunity['availableBalance']) * 1e8) / 1e8
-    
-    order_data = {
-        "client_order_id": str(uuid.uuid4()),
-        "product_id": product_id,
-        "side": "SELL",
-        "order_configuration": {
-            "market_market_ioc": {
-                "base_size": str(base_amount)
+
+    def try_sell(amount, places):
+        # Runden Sie die Menge auf die spezifizierte Anzahl von Dezimalstellen ab
+        rounded_amount = amount.quantize(Decimal('1e-{}'.format(places)), rounding=ROUND_DOWN)
+        
+        order_data = {
+            "client_order_id": str(uuid.uuid4()),
+            "product_id": product_id,
+            "side": "SELL",
+            "order_configuration": {
+                "market_market_ioc": {
+                    "base_size": str(rounded_amount)
+                }
             }
         }
-    }
-    
-    payload = json.dumps(order_data)
-    logging.debug(f"Sending sell order with payload: {payload}")
-    response = getResponseFromAPI("/api/v3/brokerage/orders", method='POST', data=payload)
-    
-    logging.debug(f"Full API response: {response}")
-    
-    try:
+        
+        payload = json.dumps(order_data)
+        logging.debug(f"Sending sell order with payload: {payload}")
+        response = getResponseFromAPI("/api/v3/brokerage/orders", method='POST', data=payload)
+        
+        logging.debug(f"Full API response: {response}")
+        
         response_json = json.loads(response)
         if "success" in response_json and response_json["success"]:
             order_id = response_json["success_response"]["order_id"]
@@ -279,40 +283,48 @@ def sellCurrency(opportunity, force=False):
             order_details = getOrderDetails(order_id)
             
             if order_details:
-                filled_size = float(order_details.get("filled_size", base_amount))
+                filled_size = float(order_details.get("filled_size", rounded_amount))
                 filled_value = float(order_details.get("filled_value", 0))
                 price = filled_value / filled_size if filled_size > 0 else opportunity['currentPrice']
                 
-                logging.info(f"Attempting to save trade to database: {symbol}, SELL, {filled_size}, {price}, {filled_value}, {order_id}")
-                save_trade_to_db(symbol, "SELL", filled_size, price, filled_value, order_id)
-                logging.info(f"Trade save attempt completed")
-                
                 logging.info(f"Sold {filled_size} {symbol} for approximately {filled_value:.2f} EUR at price {price:.2f}")
                 print(f"Sold {filled_size} {symbol} for approximately {filled_value:.2f} EUR at price {price:.2f}")
+                
+                save_trade_to_db(symbol, "SELL", filled_size, price, filled_value, order_id)
             else:
                 logging.warning(f"Order placed but unable to retrieve details. Order ID: {order_id}")
             
-            return response
+            return True
         else:
             error_message = response_json.get("error_response", {}).get("message", "Unknown error")
-            logging.error(f"Error selling {base_amount} {symbol}: {error_message}")
-            print(f"Error selling {base_amount} {symbol}: {error_message}")
-            logging.error(f"Full error response: {json.dumps(response_json, indent=2)}")
-            return None
-    except Exception as e:
-        logging.error(f"Exception occurred while processing sell order for {symbol}: {str(e)}")
-        print(f"Exception occurred while processing sell order for {symbol}: {str(e)}")
-        logging.error(f"Full response that caused the error: {response}")
-        return None
+            if "Too many decimals in order amount" in error_message:
+                return False
+            else:
+                logging.error(f"Error selling {rounded_amount} {symbol}: {error_message}")
+                print(f"Error selling {rounded_amount} {symbol}: {error_message}")
+                logging.error(f"Full error response: {json.dumps(response_json, indent=2)}")
+                return None
+
+    # Versuchen Sie den Verkauf mit abnehmender Anzahl von Dezimalstellen
+    for places in range(decimal_places, 0, -1):
+        result = try_sell(base_amount, places)
+        if result is True:
+            return "Success"
+        elif result is None:
+            return None  # Ein anderer Fehler ist aufgetreten, Abbruch
+
+    logging.error(f"Failed to sell {symbol} even with 1 decimal place")
+    return None
 
 def buyCurrency(symbol, amount_eur, force=False):
-    if TESTING_MODE and not force:
-        logging.info(f"TESTING: Would buy {amount_eur}€ of {symbol}")
+    print(f"Attempting to buy {symbol} for {amount_eur} EUR")
+    
+    if amount_eur < 10:
+        print(f"Skipping buy for {symbol} because amount {amount_eur} EUR is less than 10 EUR")
         return None
 
-    eur_balance = Decimal(getAccountEURBalance())
-    if eur_balance < Decimal(str(amount_eur)):
-        logging.error(f"Insufficient balance to buy {amount_eur}€ of {symbol}. Available balance: {eur_balance}€")
+    if TESTING_MODE and not force:
+        print(f"TESTING: Would buy {amount_eur}€ of {symbol}")
         return None
 
     product_id = f"{symbol}-EUR"
@@ -345,16 +357,20 @@ def buyCurrency(symbol, amount_eur, force=False):
             if order_details:
                 filled_size = float(order_details.get("filled_size", 0))
                 filled_value = float(order_details.get("filled_value", amount_eur))
-                price = filled_value / filled_size if filled_size > 0 else 0
                 
-                logging.info(f"Attempting to save trade to database: {symbol}, BUY, {filled_size}, {price}, {filled_value}, {order_id}")
-                save_trade_to_db(symbol, "BUY", filled_size, price, filled_value, order_id)
-                logging.info(f"Trade save attempt completed")
-                logging.info(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
-                print(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
+                if filled_size > 0 and filled_value > 0:
+                    price = filled_value / filled_size
+                    
+                    logging.info(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
+                    print(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
+                    
+                    save_trade_to_db(symbol, "BUY", filled_size, price, filled_value, order_id)
+                else:
+                    logging.warning(f"Order placed for {symbol} but filled size or value is zero. Order ID: {order_id}")
+                    print(f"Order placed for {symbol} but no coins were bought. Please check your account.")
             else:
                 logging.warning(f"Order placed but unable to retrieve details. Order ID: {order_id}")
-                print(f"Order placed but unable to retrieve details. Order ID: {order_id}")
+                print(f"Order placed for {symbol} but unable to retrieve details. Please check your account.")
             
             return response
         else:
