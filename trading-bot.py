@@ -132,10 +132,8 @@ def get_buy_opportunities():
     global resampledData
     global allCurrencyAnalysis
 
-    # Hole den aktuellen EUR-Kontostand
     eur_balance = Decimal(getAccountEURBalance())
     
-    # Runde das Investitionskapital auf die nächste Zehnerstelle ab
     eur_balance = Decimal(str(math.floor(eur_balance / 10) * 10))
     
     print(f"Available EUR balance (rounded down to nearest ten): {eur_balance}")
@@ -197,7 +195,7 @@ def getAccountEURBalance():
         if account['currency'] == 'EUR':
             return account['available_balance']['value']
     
-    return '0'  # Return '0' as a string if no EUR account is found
+    return '0'  
 
 def save_trade_to_db(symbol, trade_type, amount, price, total_value, transaction_id):
     query = text("""
@@ -219,7 +217,7 @@ def save_trade_to_db(symbol, trade_type, amount, price, total_value, transaction
             logging.debug(f"Database insert result: {result.rowcount} row(s) affected")
     except Exception as e:
         logging.error(f"Error saving trade to database: {e}")
-        raise  # Re-raise the exception to ensure it's not silently ignored
+        raise  
 
 def get_sellable_balances(accountsJson):
     accounts = json.loads(accountsJson)['accounts']
@@ -252,7 +250,6 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
     product_id = f"{symbol}-EUR"
 
     def try_sell(amount, places):
-        # Runden Sie die Menge auf die spezifizierte Anzahl von Dezimalstellen ab
         rounded_amount = amount.quantize(Decimal('1e-{}'.format(places)), rounding=ROUND_DOWN)
         
         order_data = {
@@ -276,10 +273,7 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
         if "success" in response_json and response_json["success"]:
             order_id = response_json["success_response"]["order_id"]
             
-            # Warte kurz, um der API Zeit zu geben, den Auftrag zu verarbeiten
             time.sleep(2)
-            
-            # Hole die Orderdetails
             order_details = getOrderDetails(order_id)
             
             if order_details:
@@ -305,13 +299,12 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
                 logging.error(f"Full error response: {json.dumps(response_json, indent=2)}")
                 return None
 
-    # Versuchen Sie den Verkauf mit abnehmender Anzahl von Dezimalstellen
     for places in range(decimal_places, 0, -1):
         result = try_sell(base_amount, places)
         if result is True:
             return "Success"
         elif result is None:
-            return None  # Ein anderer Fehler ist aufgetreten, Abbruch
+            return None  
 
     logging.error(f"Failed to sell {symbol} even with 1 decimal place")
     return None
@@ -424,5 +417,3 @@ if __name__ == "__main__":
     for opportunity in buyOpportunities:
         buyCurrency(opportunity['symbol'], opportunity['amount_eur'])
     
-    #buyCurrency('UNI', 2, True) 
-    #sellCurrency('BTC', 10, True)
