@@ -22,12 +22,12 @@ def getTradableCurrencies() -> List[str]:
     eurQuotes = getAllEURQuotes()
     return [product['base_currency_id'] for product in eurQuotes]
 
-def resample_data(df, interval='1H'):
+def resampleData(df, interval='1H'):
     df = df.set_index('timestamp')
     resampled = df.groupby('symbol').resample(interval).agg({'price': 'last'}).reset_index()
     return resampled
 
-def calculate_rsi(prices, periods=14):
+def calculateRsi(prices, periods=14):
     delta = prices.diff()
     
     gain = (delta.where(delta > 0, 0)).ewm(span=periods, adjust=False).mean()
@@ -38,7 +38,7 @@ def calculate_rsi(prices, periods=14):
     
     return rsi
 
-def determine_all_currency_analysis(df, rsi_periods=14, sma_window=20):
+def determineAllCurrencyAnalysis(df, rsi_periods=14, sma_window=20):
     analysis = {}
     for symbol in df['symbol'].unique():
         symbol_data = df[df['symbol'] == symbol].sort_values('timestamp')
@@ -49,7 +49,7 @@ def determine_all_currency_analysis(df, rsi_periods=14, sma_window=20):
         prices = symbol_data['price']
         current_price = prices.iloc[-1]
         sma = prices.rolling(window=sma_window).mean().iloc[-1]
-        rsi = calculate_rsi(prices, periods=rsi_periods).iloc[-1]
+        rsi = calculateRsi(prices, periods=rsi_periods).iloc[-1]
         
         analysis[symbol] = {
             'currentPrice': current_price,
@@ -59,7 +59,7 @@ def determine_all_currency_analysis(df, rsi_periods=14, sma_window=20):
     
     return analysis
 
-def fetch_market_data_last_4_days(tradable_currencies):
+def fetchMarketDataOfLastDays(tradable_currencies):
     four_days_ago = datetime.now() - timedelta(days=4)
     query = text("""
     SELECT symbol, price, timestamp
@@ -82,14 +82,14 @@ def fetch_market_data_last_4_days(tradable_currencies):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     return df
 
-def get_sell_opportunities():
+def getSellOpportunities():
     global tradableCurrencies
     global marketData
     global resampledData
     global allCurrencyAnalysis
 
     accountsJson = getAccounts()
-    sellableBalances = get_sellable_balances(accountsJson)
+    sellableBalances = getSellableBalances(accountsJson)
     sellableBalances = {k: v for k, v in sellableBalances.items() if k not in known_stablecoins}
     logging.info(f"Sellable non-stablecoin balances: {sellableBalances}")
     
@@ -126,7 +126,7 @@ def get_sell_opportunities():
     
     return sellOpportunities
 
-def get_buy_opportunities():
+def getBuyOpportunities():
     global tradableCurrencies
     global marketData
     global resampledData
@@ -197,7 +197,7 @@ def getAccountEURBalance():
     
     return '0'  
 
-def save_trade_to_db(symbol, trade_type, amount, price, total_value, transaction_id):
+def saveTradeToDb(symbol, trade_type, amount, price, total_value, transaction_id):
     query = text("""
     INSERT INTO trades (symbol, type, amount, price, total_value, transaction_id)
     VALUES (:symbol, :type, :amount, :price, :total_value, :transaction_id)
@@ -219,7 +219,7 @@ def save_trade_to_db(symbol, trade_type, amount, price, total_value, transaction
         logging.error(f"Error saving trade to database: {e}")
         raise  
 
-def get_sellable_balances(accountsJson):
+def getSellableBalances(accountsJson):
     accounts = json.loads(accountsJson)['accounts']
     sellableBalances = {}
     
@@ -227,13 +227,13 @@ def get_sellable_balances(accountsJson):
         currency = account['currency']
         balance = Decimal(account['available_balance']['value'])
         
-        if balance > 0:
+        eurValue = getWalletsEurValue(currency)
+        logging.debug(f"{currency} wallet has the € value " + str(eurValue))
+
+        if eurValue > 0.00:
             sellableBalances[currency] = balance
     
     return sellableBalances
-
-def simple_moving_average(prices, window=20):
-    return prices.rolling(window=window).mean()
 
 def sellCurrency(opportunity, force=False, decimal_places=8):
     if TESTING_MODE and not force:
@@ -249,7 +249,7 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
 
     product_id = f"{symbol}-EUR"
 
-    def try_sell(amount, places):
+    def trySell(amount, places):
         rounded_amount = amount.quantize(Decimal('1e-{}'.format(places)), rounding=ROUND_DOWN)
         
         order_data = {
@@ -284,7 +284,7 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
                 logging.info(f"Sold {filled_size} {symbol} for approximately {filled_value:.2f} EUR at price {price:.2f}")
                 print(f"Sold {filled_size} {symbol} for approximately {filled_value:.2f} EUR at price {price:.2f}")
                 
-                save_trade_to_db(symbol, "SELL", filled_size, price, filled_value, order_id)
+                saveTradeToDb(symbol, "SELL", filled_size, price, filled_value, order_id)
             else:
                 logging.warning(f"Order placed but unable to retrieve details. Order ID: {order_id}")
             
@@ -300,7 +300,7 @@ def sellCurrency(opportunity, force=False, decimal_places=8):
                 return None
 
     for places in range(decimal_places, 0, -1):
-        result = try_sell(base_amount, places)
+        result = trySell(base_amount, places)
         if result is True:
             return "Success"
         elif result is None:
@@ -357,7 +357,7 @@ def buyCurrency(symbol, amount_eur, force=False):
                     logging.info(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
                     print(f"Successfully bought approximately {filled_size:.8f} {symbol} for {filled_value:.2f}€ at price {price:.2f}")
                     
-                    save_trade_to_db(symbol, "BUY", filled_size, price, filled_value, order_id)
+                    saveTradeToDb(symbol, "BUY", filled_size, price, filled_value, order_id)
                 else:
                     logging.warning(f"Order placed for {symbol} but filled size or value is zero. Order ID: {order_id}")
                     print(f"Order placed for {symbol} but no coins were bought. Please check your account.")
@@ -378,12 +378,12 @@ def buyCurrency(symbol, amount_eur, force=False):
         logging.error(f"Full response that caused the error: {response}")
         return None
 
-def print_top_rsi_values():
+def printTopRsiValues():
 
-    marketData = fetch_market_data_last_4_days(tradableCurrencies)
-    resampledData = resample_data(marketData, interval='1h')
+    marketData = fetchMarketDataOfLastDays(tradableCurrencies)
+    resampledData = resampleData(marketData, interval='1h')
 
-    all_currency_analysis = determine_all_currency_analysis(resampledData)
+    all_currency_analysis = determineAllCurrencyAnalysis(resampledData)
     sell_candidates = sorted(all_currency_analysis.items(), key=lambda x: x[1]['rsi'], reverse=True)[:3]
     buy_candidates = sorted(all_currency_analysis.items(), key=lambda x: x[1]['rsi'])[:3]
     
@@ -399,21 +399,21 @@ def print_top_rsi_values():
 
 if __name__ == "__main__":
     tradableCurrencies = getTradableCurrencies()
-    tradableCurrencies = filter_out_stablecoins(tradableCurrencies)
+    tradableCurrencies = filterOutStablecoins(tradableCurrencies)
     logging.info(f"Tradable non-stablecoin currencies: {tradableCurrencies}")
 
-    marketData = fetch_market_data_last_4_days(tradableCurrencies)
-    resampledData = resample_data(marketData, interval='1h')
+    marketData = fetchMarketDataOfLastDays(tradableCurrencies)
+    resampledData = resampleData(marketData, interval='1h')
 
-    allCurrencyAnalysis = determine_all_currency_analysis(resampledData)
+    allCurrencyAnalysis = determineAllCurrencyAnalysis(resampledData)
 
-    print_top_rsi_values()
+    printTopRsiValues()
 
-    sellOpportunities = get_sell_opportunities()
+    sellOpportunities = getSellOpportunities()
     for opportunity in sellOpportunities:
         sellCurrency(opportunity)
     
-    buyOpportunities = get_buy_opportunities()
+    buyOpportunities = getBuyOpportunities()
     for opportunity in buyOpportunities:
         buyCurrency(opportunity['symbol'], opportunity['amount_eur'])
     

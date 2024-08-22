@@ -13,6 +13,7 @@ from coinbase import jwt_generator
 from dotenv import load_dotenv
 import logging
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 # Load .env file
 load_dotenv()
@@ -41,7 +42,7 @@ known_stablecoins = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'PAX', 'GUSD', 'HUSD
 
 payload = ''
 
-def parse_arguments():
+def parseArguments():
     parser = argparse.ArgumentParser(description="Trading Bot with customizable log level")
     parser.add_argument('--log-level', default='INFO', 
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
@@ -50,14 +51,14 @@ def parse_arguments():
                         help='Run in testing mode without executing trades')
     return parser.parse_args()
 
-args = parse_arguments()
+args = parseArguments()
 log_level = getattr(logging, args.log_level.upper())
 TESTING_MODE = args.testing
 
-def filter_out_stablecoins(currencies):
+def filterOutStablecoins(currencies):
     return [currency for currency in currencies if currency not in known_stablecoins]
 
-def setup_logging(log_directory='/var/log', log_level=logging.INFO):
+def setupLogging(log_directory='/var/log', log_level=logging.INFO):
     if not os.path.exists(log_directory):
         os.makedirs(log_directory)
     
@@ -72,7 +73,7 @@ def setup_logging(log_directory='/var/log', log_level=logging.INFO):
     )
 
 # Set up logging
-setup_logging(log_level=log_level)
+setupLogging(log_level=log_level)
 
 def getResponseFromAPI(uri, method='GET', data=None):
     global payload, headers
@@ -155,3 +156,33 @@ def getJwtToken(uri, method='GET'):
     jwt_uri = jwt_generator.format_jwt_uri(method, uri)
     jwt_token = jwt_generator.build_rest_jwt(jwt_uri, api_key, api_secret)
     return jwt_token
+
+def getWalletsEurValue(currency):
+    accounts_json = getAccounts()
+    accounts = json.loads(accounts_json)['accounts']
+    
+    account = next((acc for acc in accounts if acc['currency'] == currency), None)
+    
+    if not account:
+        logging.error(f"No wallet found for {currency}.")
+        return None
+    
+    balance = Decimal(account['available_balance']['value'])
+    
+    if balance == 0:
+        logging.debug(f"The {currency} wallet value is at 0.00")
+        return Decimal('0.00')
+    
+    if currency == 'EUR':
+        return balance.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    
+    product_id = f"{currency}-EUR"
+    try:
+        current_price = Decimal(getCurrentPrice(product_id))
+        eur_value = (balance * current_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        
+        return eur_value
+    except Exception as e:
+        print(f"Error fetching wallet price for {currency}: {str(e)}")
+        logging.error(f"Error fetching wallet price for {currency}: {str(e)}")
+        return None
