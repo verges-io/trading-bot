@@ -131,57 +131,69 @@ def getBuyOpportunities():
     global marketData
     global resampledData
     global allCurrencyAnalysis
-    
+
     eur_balance = Decimal(getAccountEURBalance())
     eur_balance = Decimal(str(math.floor(eur_balance / 10) * 10))
     print(f"Available EUR balance (rounded down to nearest ten): {eur_balance}")
-    
+
     if eur_balance < 10:
         print("Insufficient EUR available for investment.")
         return []
-    
+
     # Filter currencies with RSI < 30 and sort them by RSI in ascending order
     top_performers = sorted(
         [(currency, analysis) for currency, analysis in allCurrencyAnalysis.items() if analysis['rsi'] < 30],
         key=lambda x: x[1]['rsi']
     )[:3]  # Limit to top 3
-    
+
     if not top_performers:
         print("No cryptocurrencies with RSI < 30 found. Investment postponed.")
         return []
-    
+
     buy_opportunities = []
-    remaining_balance = eur_balance
-    total_inverse_rsi = sum(1 / analysis['rsi'] for _, analysis in top_performers)
     
-    for currency, analysis in top_performers:
-        if remaining_balance < 10:
-            print(f"Remaining balance {remaining_balance} is less than 10 EUR. Stopping.")
-            break
+    # Spezialfall: Wenn genau 10 Euro verfügbar sind
+    if eur_balance == Decimal('10'):
+        top_currency, top_analysis = top_performers[0]
+        buy_opportunities.append({
+            'symbol': top_currency,
+            'amount_eur': eur_balance,
+            'current_price': top_analysis['currentPrice'],
+            'rsi': top_analysis['rsi']
+        })
+        print(f"Exactly €10 available. Investing all in top opportunity: {top_currency}")
+    else:
+        remaining_balance = eur_balance
+        total_inverse_rsi = sum(1 / analysis['rsi'] for _, analysis in top_performers)
         
-        # Calculate weight based on inverse of RSI
-        weight = (1 / analysis['rsi']) / total_inverse_rsi
-        investment_amount = eur_balance * Decimal(weight)
-        rounded_amount = Decimal(math.floor(investment_amount / 10) * 10)
-        
-        print(f"Considering {currency}: Investment amount before rounding: {investment_amount}, after rounding: {rounded_amount}")
-        
-        if rounded_amount >= 10:
-            buy_opportunities.append({
-                'symbol': currency,
-                'amount_eur': rounded_amount,
-                'current_price': analysis['currentPrice'],
-                'rsi': analysis['rsi']
-            })
-            remaining_balance -= rounded_amount
-            print(f"Added buy opportunity for {currency}: {rounded_amount} EUR. Remaining balance: {remaining_balance}")
-        else:
-            print(f"Skipping {currency} because rounded amount {rounded_amount} is less than 10 EUR")
-    
+        for currency, analysis in top_performers:
+            if remaining_balance < 10:
+                print(f"Remaining balance {remaining_balance} is less than 10 EUR. Stopping.")
+                break
+            
+            # Calculate weight based on inverse of RSI
+            weight = (1 / analysis['rsi']) / total_inverse_rsi
+            investment_amount = eur_balance * Decimal(weight)
+            rounded_amount = Decimal(math.floor(investment_amount / 10) * 10)
+            
+            print(f"Considering {currency}: Investment amount before rounding: {investment_amount}, after rounding: {rounded_amount}")
+            
+            if rounded_amount >= 10:
+                buy_opportunities.append({
+                    'symbol': currency,
+                    'amount_eur': rounded_amount,
+                    'current_price': analysis['currentPrice'],
+                    'rsi': analysis['rsi']
+                })
+                remaining_balance -= rounded_amount
+                print(f"Added buy opportunity for {currency}: {rounded_amount} EUR. Remaining balance: {remaining_balance}")
+            else:
+                print(f"Skipping {currency} because rounded amount {rounded_amount} is less than 10 EUR")
+
     print("Final buy opportunities:")
     for opportunity in buy_opportunities:
         print(f"{opportunity['symbol']}: €{opportunity['amount_eur']} (RSI: {opportunity['rsi']:.2f})")
-    
+
     return buy_opportunities
 
 def getAccountEURBalance():
