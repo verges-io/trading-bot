@@ -5,8 +5,8 @@ This project implements a simple trading bot for Coinbase, using RSI (Relative S
 ## Features
 
 - Fetches market data for tradable currencies from Coinbase API
-- Calculates RSI and SMA for each currency
-- Identifies buy and sell opportunities based on RSI and SMA values
+- Calculates RSI for each currency
+- Identifies buy and sell opportunities based on RSI values
 - Executes trades automatically
 - Stores trade history and market data in a PostgreSQL database
 

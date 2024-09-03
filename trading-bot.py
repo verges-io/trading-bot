@@ -28,33 +28,37 @@ def resampleData(df, interval='1H'):
     return resampled
 
 def calculateRsi(prices, periods=14):
+    prices = prices.astype(float).dropna()
     delta = prices.diff()
-    
-    gain = (delta.where(delta > 0, 0)).ewm(span=periods, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(span=periods, adjust=False).mean()
-    
+
+    gain = delta.where(delta > 0, 0).ewm(span=periods, adjust=False).mean()
+    loss = -delta.where(delta < 0, 0).ewm(span=periods, adjust=False).mean()
+
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     
     return rsi
 
-def determineAllCurrencyAnalysis(df, rsi_periods=14, sma_window=20):
+def determineAllCurrencyAnalysis(df, rsi_periods=14):
     analysis = {}
     for symbol in df['symbol'].unique():
         symbol_data = df[df['symbol'] == symbol].sort_values('timestamp')
-        
-        if len(symbol_data) < max(rsi_periods, sma_window):
+
+        if len(symbol_data) < rsi_periods:
+            print(f"Skipping {symbol} due to insufficient data")
             continue
-        
-        prices = symbol_data['price']
+
+        prices = symbol_data['price'].astype(float)
         current_price = prices.iloc[-1]
-        sma = prices.rolling(window=sma_window).mean().iloc[-1]
         rsi = calculateRsi(prices, periods=rsi_periods).iloc[-1]
-        
+
+        if pd.isna(current_price) or pd.isna(rsi):
+            print(f"Skipping {symbol} due to NaN values")
+            continue
+
         analysis[symbol] = {
-            'currentPrice': current_price,
-            'sma': sma,
-            'rsi': rsi
+            'currentPrice': float(current_price),
+            'rsi': float(rsi)
         }
     
     return analysis
@@ -97,28 +101,27 @@ def getSellOpportunities():
     logging.info("Analysis for all non-stablecoin currencies:")
     for currency, analysis in allCurrencyAnalysis.items():
         logging.info(f"{currency}: Current price {analysis['currentPrice']:.4f}, "
-                     f"SMA {analysis['sma']:.4f}, RSI {analysis['rsi']:.2f}")
+                     f"RSI {analysis['rsi']:.2f}")
     
     # Filter for sell opportunities
     sellOpportunities = []
     for currency, analysis in allCurrencyAnalysis.items():
         if currency in sellableBalances:
             balance = sellableBalances[currency]
-            if balance > Decimal('0.00001') and analysis['currentPrice'] > analysis['sma'] and analysis['rsi'] > 70:
+            if balance > Decimal('0.00001') and analysis['rsi'] > 70:  # Entfernen Sie die MA-Bedingung
                 opportunity = {
                     'symbol': currency,
                     'currentPrice': analysis['currentPrice'],
-                    'sma': analysis['sma'],
                     'rsi': analysis['rsi'],
                     'availableBalance': float(balance)
                 }
                 sellOpportunities.append(opportunity)
-    
+
     if sellOpportunities:
         logging.info("Sell opportunities (with available balance):")
         for opportunity in sellOpportunities:
             logging.info(f"{opportunity['symbol']} with current price {opportunity['currentPrice']:.4f}, "
-                         f"SMA {opportunity['sma']:.4f}, RSI {opportunity['rsi']:.2f}, "
+                         f"RSI {opportunity['rsi']:.2f}, "
                          f"Available balance: {opportunity['availableBalance']:.8f}")
     else:
         logging.info("No sell opportunities found based on the criteria and available balances.")
