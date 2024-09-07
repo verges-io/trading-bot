@@ -145,12 +145,12 @@ def getBuyOpportunities():
 
     # Filter currencies with RSI < 30 and sort them by RSI in ascending order
     top_performers = sorted(
-        [(currency, analysis) for currency, analysis in allCurrencyAnalysis.items() if analysis['rsi'] < 30],
+        [(currency, analysis) for currency, analysis in allCurrencyAnalysis.items() if analysis['rsi'] < 50],
         key=lambda x: x[1]['rsi']
     )[:3]  # Limit to top 3
 
     if not top_performers:
-        print("No cryptocurrencies with RSI < 30 found. Investment postponed.")
+        print("No cryptocurrencies with RSI < 50 found. Investment postponed.")
         return []
 
     buy_opportunities = []
