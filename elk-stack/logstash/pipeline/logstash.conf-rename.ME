@@ -1,0 +1,67 @@
+input {
+  jdbc {
+    jdbc_driver_library => "/usr/share/logstash/jdbc/postgresql-42.7.4.jar"
+    jdbc_driver_class => "org.postgresql.Driver"
+    jdbc_connection_string => "jdbc:postgresql://localhost:5432/<your-postgresql-database>"
+    jdbc_user => "<your-postgresql-username>"
+    jdbc_password => "<your-postgresql-password>"
+    schedule => "*/5 * * * *"
+    statement => "SELECT * FROM market_data;"
+    tags => ["market_data"]
+  }
+  jdbc {
+    jdbc_driver_library => "/usr/share/logstash/jdbc/postgresql-42.7.4.jar"
+    jdbc_driver_class => "org.postgresql.Driver"
+    jdbc_connection_string => "jdbc:postgresql://localhost:5432/<your-postgresql-database>"
+    jdbc_user => "<your-postgresql-username>"
+    jdbc_password => "<your-postgresql-password>"
+    schedule => "*/5 * * * *"
+    statement => "SELECT * FROM trades;"
+    tags => ["trades"]
+  }
+  jdbc {
+    jdbc_driver_library => "/usr/share/logstash/jdbc/postgresql-42.7.4.jar"
+    jdbc_driver_class => "org.postgresql.Driver"
+    jdbc_connection_string => "jdbc:postgresql://localhost:5432/<your-postgresql-database>"
+    jdbc_user => "<your-postgresql-username>"
+    jdbc_password => "<your-postgresql-password>"
+    schedule => "*/5 * * * *"
+    statement => "SELECT * FROM portfolio_value_history;"
+    tags => ["portfolio_history"]
+  }
+}
+
+filter {
+  if "trades" in [tags] {
+    mutate {
+      add_field => { "[@metadata][type]" => "trades" }
+    }
+  }
+}
+
+output {
+  if "trades" in [tags] {
+    elasticsearch {
+      hosts => [http://localhost:9200]
+      user => "<your-es-username>"
+      password => "<your-es-password>"
+      index => "postgresql-trades-%{+YYYY.MM.dd}"
+    }
+  }
+  if "market_data" in [tags] {
+    elasticsearch {
+      hosts => [http://localhost:9200]
+      user => "<your-es-username>"
+      password => "<your-es-password>"
+      index => "postgresql-market-data-%{+YYYY.MM.dd}"
+    }
+  }
+  if "portfolio_history" in [tags] {
+    elasticsearch {
+      hosts => [http://localhost:9200]
+      user => "<your-es-username>"
+      password => "<your-es-password>"
+      index => "postgresql-portfolio-history-%{+YYYY.MM.dd}"
+    }
+  }
+}

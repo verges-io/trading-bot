@@ -152,6 +152,18 @@ def storeMarketData(symbol, price, timestamp):
         logging.error(f"Failed to store market data for {symbol} at {timestamp} with price {price}: {e}")
         print(f"Failed to store market data for {symbol} at {timestamp} with price {price}: {e}")
 
+def storePortfolioData(value, fiat_currency="EUR"):
+    try:
+        with engine.begin() as conn:  # Use a transaction
+            stmt = text("INSERT INTO portfolio_value_history (total_value, fiat_currency) VALUES (:total_value, :fiat_currency)")
+            logging.debug(f"Executing SQL: {stmt} with params total_value={value}, fiat_currency={fiat_currency}")
+            conn.execute(stmt, {"total_value": float(value), "fiat_currency": fiat_currency})
+            logging.debug(f"Stored portfolio total_value at {value} {fiat_currency}")
+    except exc.SQLAlchemyError as e:
+        logging.error(f"Failed to store portfolio total_value at {value} {fiat_currency}: {e}")
+        print(f"Failed to store portfolio total_value at {value} {fiat_currency}: {e}")
+
+
 def getJwtToken(uri, method='GET'):
     jwt_uri = jwt_generator.format_jwt_uri(method, uri)
     jwt_token = jwt_generator.build_rest_jwt(jwt_uri, api_key, api_secret)

@@ -1,5 +1,10 @@
+venv
 .env
 *.log
 *.txt
 __pycache__
 myenv
+elk-stack/config/*.yml
+elk-stack/logstash/pipeline/*.conf
+elk-stack/logstash/config/*.yml
+elk-stack/logstash/pipeline/*.conf

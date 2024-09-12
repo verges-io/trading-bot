@@ -6,13 +6,27 @@ def getCurrencyDetails(cId):
     data = res.read()
     print(data.decode("utf-8"))
 
-def getAccounts():
-    x = getResponseFromAPI(f"/api/v3/brokerage/accounts")
-    print(x)
-
 def getProducts():
     x = getResponseFromAPI(f"/api/v3/brokerage/market/products")
     return x
+
+def getPortfolio():
+    w = getAccounts()
+    print(w)
+    responseX = json.loads(w)
+
+    portfolioId = responseX['accounts'][0]['retail_portfolio_id']
+    x = getResponseFromAPI(f"/api/v3/brokerage/portfolios/{portfolioId}")
+    return x
+
+def getPortfolioBalance():
+    x = getPortfolio()
+    responseJson = json.loads(x)
+    return responseJson['breakdown']['portfolio_balances']['total_balance']
+
+def storePortfolioBalance():
+    x = getPortfolioBalance()
+    storePortfolioData(x['value'], x['currency'])
 
 def getAllEURQuotes():
     allQuotes = getProducts()
@@ -27,3 +41,4 @@ def storeAllEURQuotes():
 
 if __name__ == '__main__':
     storeAllEURQuotes()
+    storePortfolioBalance()
