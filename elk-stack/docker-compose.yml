@@ -1,41 +1,39 @@
 version: '3'
 services:
   elasticsearch:
-    network_mode: host
+    network_mode: "host"
     image: docker.elastic.co/elasticsearch/elasticsearch:7.15.0
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ELASTIC_PASSWORD="${ELASTICSEARCH_PASSWORD}"
       - xpack.security.enabled=true
     volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - ./elasticsearch/data:/usr/share/elasticsearch/data
     restart: unless-stopped
 
   logstash:
-    network_mode: host
+    network_mode: "host"
     image: docker.elastic.co/logstash/logstash:7.15.0
     volumes:
-      - ./logstash/pipeline:/usr/share/logstash/pipeline
+      - ./logstash/pipeline/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
       - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
       - ./logstash/jdbc/postgresql-42.7.4.jar:/usr/share/logstash/logstash-core/lib/jars/postgresql-42.7.4.jar
       - ./logstash/jdbc/postgresql-42.7.4.jar:/usr/share/logstash/jdbc/postgresql-42.7.4.jar
+      - ./logstash/share/logstash/data:/usr/share/logstash/data
     depends_on:
       - elasticsearch
     restart: unless-stopped
 
   kibana:
-    network_mode: host
+    network_mode: "host"
     image: docker.elastic.co/kibana/kibana:7.15.0
     volumes:
       - ./config/kibana.yml:/usr/share/kibana/config/kibana.yml
     environment:
-      - ELASTICSEARCH_HOSTS=http://localhost:9200
+      - ELASTICSEARCH_HOSTS="http://localhost:9200"
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ELASTICSEARCH_PASSWORD="${ELASTICSEARCH_PASSWORD}"
     depends_on:
       - elasticsearch
     restart: unless-stopped
-
-volumes:
-  elasticsearch-data:

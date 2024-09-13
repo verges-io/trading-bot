@@ -6,7 +6,7 @@ input {
     jdbc_user => "<your-postgresql-username>"
     jdbc_password => "<your-postgresql-password>"
     schedule => "*/5 * * * *"
-    statement => "SELECT * FROM market_data;"
+    statement => "SELECT * FROM market_data WHERE timestamp >= NOW() - INTERVAL '1 day';"
     tags => ["market_data"]
   }
   jdbc {
@@ -16,7 +16,7 @@ input {
     jdbc_user => "<your-postgresql-username>"
     jdbc_password => "<your-postgresql-password>"
     schedule => "*/5 * * * *"
-    statement => "SELECT * FROM trades;"
+    statement => "SELECT * FROM trades WHERE timestamp >= NOW() - INTERVAL '1 day';"
     tags => ["trades"]
   }
   jdbc {
@@ -26,23 +26,15 @@ input {
     jdbc_user => "<your-postgresql-username>"
     jdbc_password => "<your-postgresql-password>"
     schedule => "*/5 * * * *"
-    statement => "SELECT * FROM portfolio_value_history;"
+    statement => "SELECT * FROM portfolio_value_history WHERE timestamp >= NOW() - INTERVAL '1 day';"
     tags => ["portfolio_history"]
-  }
-}
-
-filter {
-  if "trades" in [tags] {
-    mutate {
-      add_field => { "[@metadata][type]" => "trades" }
-    }
   }
 }
 
 output {
   if "trades" in [tags] {
     elasticsearch {
-      hosts => [http://localhost:9200]
+      hosts => ["http://localhost:9200"]
       user => "<your-es-username>"
       password => "<your-es-password>"
       index => "postgresql-trades-%{+YYYY.MM.dd}"
@@ -50,7 +42,7 @@ output {
   }
   if "market_data" in [tags] {
     elasticsearch {
-      hosts => [http://localhost:9200]
+      hosts => ["http://localhost:9200"]
       user => "<your-es-username>"
       password => "<your-es-password>"
       index => "postgresql-market-data-%{+YYYY.MM.dd}"
@@ -58,7 +50,7 @@ output {
   }
   if "portfolio_history" in [tags] {
     elasticsearch {
-      hosts => [http://localhost:9200]
+      hosts => ["http://localhost:9200"]
       user => "<your-es-username>"
       password => "<your-es-password>"
       index => "postgresql-portfolio-history-%{+YYYY.MM.dd}"
