@@ -8,3 +8,5 @@ elk-stack/config/*.yml
 elk-stack/logstash/pipeline/*.conf
 elk-stack/logstash/config/*.yml
 elk-stack/logstash/pipeline/*.conf
+elk-stack/elasticsearch/data/*
+elk-stack/logstash/share/logstash/*

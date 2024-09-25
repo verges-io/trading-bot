@@ -34,10 +34,15 @@ def getAllEURQuotes():
     eurProducts = [product for product in responseJson['products'] if product['quote_currency_id'] == 'EUR']
     return eurProducts
 
+def getRsiValueForSymbol(symbol, period='1h'):
+    rsi = determineAllCurrencyAnalysis(resampleData(fetchMarketDataOfLastDays({symbol}), interval=period))
+    return rsi.get(symbol).get('rsi')
+
 def storeAllEURQuotes():
     x = getAllEURQuotes()
     for p in x:
-        storeMarketData(p['base_currency_id'], p['price'], pd.to_datetime('now'))
+        currentRsi = getRsiValueForSymbol(p['base_currency_id'])
+        storeMarketData(p['base_currency_id'], p['price'], pd.to_datetime('now'), currentRsi)
 
 if __name__ == '__main__':
     storeAllEURQuotes()

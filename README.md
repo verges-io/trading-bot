@@ -56,7 +56,8 @@ This project implements a simple trading bot for Coinbase, using RSI (Relative S
          id SERIAL PRIMARY KEY,
          symbol VARCHAR(10),
          timestamp TIMESTAMPTZ,
-         price DECIMAL
+         price DECIMAL,
+         rsi DECIMAL(11, 8)
      );
      ```
    - Exit the PostgreSQL prompt:

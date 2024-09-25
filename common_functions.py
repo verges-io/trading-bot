@@ -114,7 +114,6 @@ def getCurrencyDetails(cId):
 
 def getAccounts():
     x = getResponseFromAPI(f"/api/v3/brokerage/accounts")
-    logging.info(f"getAccounts returned: {x[:100]}...")  # Zeigt die ersten 100 Zeichen
     return x
 
 def getCurrentPrice(product_id):
@@ -141,13 +140,13 @@ def getAllEURQuotes():
     eurProducts = [product for product in responseJson['products'] if product['quote_currency_id'] == 'EUR']
     return eurProducts
 
-def storeMarketData(symbol, price, timestamp):
+def storeMarketData(symbol, price, timestamp, rsi=None):
     try:
         with engine.begin() as conn:  # Use a transaction
-            stmt = text("INSERT INTO market_data (symbol, price, timestamp) VALUES (:symbol, :price, :timestamp)")
+            stmt = text("INSERT INTO market_data (symbol, price, timestamp, rsi) VALUES (:symbol, :price, :timestamp, :rsi)")
             logging.debug(f"Executing SQL: {stmt} with params symbol={symbol}, price={price}, timestamp={timestamp}")
-            conn.execute(stmt, {"symbol": symbol, "price": float(price), "timestamp": str(timestamp)})
-            logging.debug(f"Stored market data for {symbol} at {timestamp} with price {price}")
+            conn.execute(stmt, {"symbol": symbol, "price": float(price), "timestamp": str(timestamp), "rsi": float(rsi)})
+            logging.debug(f"Stored market data for {symbol} at {timestamp} with price {price} and RSI {rsi}")
     except exc.SQLAlchemyError as e:
         logging.error(f"Failed to store market data for {symbol} at {timestamp} with price {price}: {e}")
         print(f"Failed to store market data for {symbol} at {timestamp} with price {price}: {e}")
@@ -198,3 +197,67 @@ def getWalletsEurValue(currency):
         print(f"Error fetching wallet price for {currency}: {str(e)}")
         logging.error(f"Error fetching wallet price for {currency}: {str(e)}")
         return None
+
+def resampleData(df, interval='1H'):
+    df = df.set_index('timestamp')
+    resampled = df.groupby('symbol').resample(interval).agg({'price': 'last'}).reset_index()
+    return resampled
+
+def calculateRsi(prices, periods=14):
+    prices = prices.astype(float).dropna()
+    delta = prices.diff()
+
+    gain = delta.where(delta > 0, 0).ewm(span=periods, adjust=False).mean()
+    loss = -delta.where(delta < 0, 0).ewm(span=periods, adjust=False).mean()
+
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+def determineAllCurrencyAnalysis(df, rsi_periods=14):
+    analysis = {}
+    for symbol in df['symbol'].unique():
+        symbol_data = df[df['symbol'] == symbol].sort_values('timestamp')
+
+        if len(symbol_data) < rsi_periods:
+            print(f"Skipping {symbol} due to insufficient data")
+            continue
+
+        prices = symbol_data['price'].astype(float)
+        current_price = prices.iloc[-1]
+        rsi = calculateRsi(prices, periods=rsi_periods).iloc[-1]
+
+        if pd.isna(current_price) or pd.isna(rsi):
+            print(f"Skipping {symbol} due to NaN values")
+            continue
+
+        analysis[symbol] = {
+            'currentPrice': float(current_price),
+            'rsi': float(rsi)
+        }
+    
+    return analysis
+
+def fetchMarketDataOfLastDays(tradable_currencies):
+    four_days_ago = datetime.now() - timedelta(days=4)
+    query = text("""
+    SELECT symbol, price, timestamp
+    FROM market_data
+    WHERE timestamp >= :four_days_ago
+    AND symbol IN :symbols
+    ORDER BY symbol, timestamp
+    """)
+    
+    with engine.connect() as connection:
+        result = connection.execute(
+            query,
+            {
+                "four_days_ago": four_days_ago,
+                "symbols": tuple(tradable_currencies)
+            }
+        )
+        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+    
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    return df
